@@ -634,15 +634,15 @@ uncovered_supports[("z0", "z2")] = (
     supports["z2"].to_set() - mutual_supports[("z0", "z2")].restrict(restrictions["z2"]).to_set()
 )
 
-pcsp_probabilities["all"] = sbns["all"].pcsp_probabilities()
-pcsp_probabilities["z0"] = sbns["z0"].pcsp_probabilities()
-pcsp_probabilities["z2"] = sbns["z2"].pcsp_probabilities()
+# pcsp_probabilities["all"] = sbns["all"].pcsp_probabilities()
+# pcsp_probabilities["z0"] = sbns["z0"].pcsp_probabilities()
+# pcsp_probabilities["z2"] = sbns["z2"].pcsp_probabilities()
 total_uncovered_probabilities = dict()
 total_uncovered_probabilities[("z0", "z2")] = (
     sum(pcsp_probabilities["z0"][pcsp] for pcsp in uncovered_supports[("z0", "z2")][0]),
     sum(pcsp_probabilities["z2"][pcsp] for pcsp in uncovered_supports[("z0", "z2")][1])
 )
-total_uncovered_probabilities[("z0", "z2")]
+print(total_uncovered_probabilities[("z0", "z2")])
 
 trimmed_sbns = dict()
 a = sbns["z0"].copy()
@@ -671,8 +671,11 @@ true_sbn_trim = true_sbn_trim.prune()
 true_sbn_trim.normalize()
 true_sbn_trimmed[("z0", "z2")] = true_sbn_trim
 
-supertree_sbn, kl_list, true_kl_list = scd_gradient_descent(
-    starting=starting_sbns[("z0", "z2")], references=[trimmed_sbns[("z0", "z2")][0], trimmed_sbns[("z0", "z2")][1]],
+supertree_sbn, kl_list, true_kl_list = starting_sbns[("z0", "z2")].gradient_descent(
+    references=[trimmed_sbns[("z0", "z2")][0], trimmed_sbns[("z0", "z2")][1]],
     starting_gamma=2.0, max_iteration=50, true_reference=true_sbn_trimmed[("z0", "z2")]
 )
+
+true_kl_list[-1]
+
 
