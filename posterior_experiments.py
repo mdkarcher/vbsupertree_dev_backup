@@ -1,4 +1,5 @@
 import re
+from itertools import combinations
 import numpy as np
 import pandas as pd
 import ete3
@@ -586,21 +587,30 @@ support_minus_z10 = sbn_minus_z10.support()
 len(support), len(support_minus_z0), len(support_minus_z2), len(support_minus_z3), len(support_minus_z10)
 
 # looped code
+
+from vbsupertree import *
+from dendropy_code import *
+
+
 base_name = "data/dendropy_sims/tc40/tc40_sl500_02"
 subrun = "01"
-scenario_list = [
-    ("all", ""),
-    ("z0", "_minus_z0"),
-    ("z2", "_minus_z2"),
-    ("z3", "_minus_z3"),
-    ("z10", "_minus_z10"),
-]
+scenarios = ["all", "z0", "z2", "z3", "z10"]
+references = ["z0", "z2", "z3", "z10"]
+infixes = {
+    "all": "_1e8",
+    "z0": "_minus_z0",
+    "z2": "_minus_z2",
+    "z3": "_minus_z3",
+    "z10": "_minus_z10"
+}
+
 tree_dists = dict()
 sbns = dict()
 supports = dict()
 restrictions = dict()
 pcsp_probabilities = dict()
-for key, infix in scenario_list:
+for key in scenarios:
+    infix = infixes[key]
     print(f"Starting scenario '{key}'...")
     all_trees = parse_beast_nexus(f"{base_name}{infix}_{subrun}.trees")
     print("  Trees parsed")
@@ -621,7 +631,6 @@ for key, infix in scenario_list:
     restrictions[key] = restriction
     pcsp_probability = sbn.pcsp_probabilities()
     pcsp_probabilities[key] = pcsp_probability
-
 
 # by hand interlude
 mutual_supports = dict()
@@ -677,5 +686,107 @@ supertree_sbn, kl_list, true_kl_list = starting_sbns[("z0", "z2")].gradient_desc
 )
 
 true_kl_list[-1]
+
+# full looping
+
+mutual_supports = dict()
+uncovered_supports = dict()
+total_uncovered_probabilities = dict()
+trimmed_sbns = dict()
+starting_sbns = dict()
+true_sbn_trimmed = dict()
+true_sbn_uncovered_probs = dict()
+supertree_sbns = dict()
+kl_lists = dict()
+true_kl_lists = dict()
+# combs = [("z0", "z2"), ("z3", "z10")]
+combs = combinations(references, 2)
+for key1, key2 in combs:
+    key = (key1, key2)
+    print(f"Starting reference pair {key1}, {key2}...")
+    mutual_support = supports[key1].mutualize(supports[key2])
+    mutual_supports[key] = mutual_support.prune()
+    print("  Mutual support built")
+    uncovered_supports[key] = (
+        supports[key1].to_set() - mutual_supports[key].restrict(restrictions[key1]).to_set(),
+        supports[key2].to_set() - mutual_supports[key].restrict(restrictions[key2]).to_set()
+    )
+    print("  Uncovered support found")
+    total_uncovered_probabilities[key] = (
+        sum(pcsp_probabilities[key1][pcsp] for pcsp in uncovered_supports[key][0]),
+        sum(pcsp_probabilities[key2][pcsp] for pcsp in uncovered_supports[key][1])
+    )
+    print("  Total (non-mutually exclusive) uncovered probability calculated")
+    print(f"    = {total_uncovered_probabilities[key][0]}")
+    print(f"    = {total_uncovered_probabilities[key][1]}")
+    a = sbns[key1].copy()
+    a.remove_many(uncovered_supports[key][0])
+    a = a.prune()
+    a.normalize()
+    b = sbns[key2].copy()
+    b.remove_many(uncovered_supports[key][1])
+    b = b.prune()
+    b.normalize()
+    trimmed_sbns[key] = (a, b)
+    print("  Trimmed SBNs built")
+    starting_sbns[key] = SBN.random_from_support(
+        support=mutual_supports[key], concentration=10
+    )
+    print("  Starting SBN drawn")
+    true_sbn_trim = sbns["all"].copy()
+    tst_support = true_sbn_trim.support()
+    tst_uncovered = tst_support.to_set() - mutual_supports[key].to_set()
+    true_sbn_uncovered_probs[key] = sum(pcsp_probabilities["all"][pcsp] for pcsp in tst_uncovered)
+    print("  Total (non-mutually exclusive) uncovered TRUE probability calculated")
+    print(f"    = {true_sbn_uncovered_probs[key]}")
+    true_sbn_trim.remove_many(tst_uncovered)
+    true_sbn_trim = true_sbn_trim.prune()
+    true_sbn_trim.normalize()
+    true_sbn_trimmed[key] = true_sbn_trim
+    print("  Trimmed true SBN built")
+    supertree_sbns[key], kl_lists[key], true_kl_lists[key] = starting_sbns[key].gradient_descent(
+        references=trimmed_sbns[key], starting_gamma=2.0, max_iteration=50, true_reference=true_sbn_trimmed[key]
+    )
+
+[true_kl_lists[key][0] for key in true_kl_lists]
+[true_kl_lists[key][5] for key in true_kl_lists]
+[true_kl_lists[key][-1] for key in true_kl_lists]
+
+# figures
+
+from matplotlib import pyplot as plt
+import seaborn as sns
+
+
+plt.rcParams.update({'font.size': 100})
+
+# Horizontal
+for key in kl_lists:
+    key1, key2 = key
+    sns.set_context("poster")
+    fig, (ax_kl, ax_true_kl) = plt.subplots(1, 2, figsize=(10, 5), sharey='none', sharex='none', constrained_layout=True)
+    ax_kl.set(title="Supertree Loss", xlabel="Iteration", ylabel="Nats", yscale="log")
+    ax_kl.plot(kl_lists[key])
+    ax_true_kl.set(title="KL vs. Truth", xlabel="Iteration", ylabel="", yscale="log")
+    ax_true_kl.plot(true_kl_lists[key])
+    # plt.tight_layout()
+    plt.savefig(f"figures/tc40_truth1e8/vbsupertree_{key1}_{key2}_horiz.pdf", format="pdf")
+
+# Vertical
+for key in kl_lists:
+    key1, key2 = key
+    sns.set_context("poster")
+    fig, (ax_kl, ax_true_kl) = plt.subplots(2, 1, figsize=(5, 8), sharey='none', sharex='none', constrained_layout=True)
+    # fig.suptitle("vbsupertree convergence")
+    ax_kl.set(ylabel="Supertree Loss", yscale="log")
+    # ax_kl.label_outer()
+    ax_kl.plot(kl_lists[key])
+    ax_true_kl.set(xlabel="Iteration", ylabel="KL vs. Truth", yscale="log")
+    # ax_true_kl.label_outer()
+    ax_true_kl.plot(true_kl_lists[key])
+    # plt.tight_layout()
+    plt.savefig(f"figures/tc40_truth1e8/vbsupertree_{key1}_{key2}_vert.pdf", format="pdf")
+
+
 
 
