@@ -118,6 +118,27 @@ class MyTree:
             result.add(subsplit)
         return result
 
+    def to_pcsp_support(self):
+        result = PCSPSupport()
+        for node in self.traverse():
+            if node.is_leaf():
+                continue
+            assert len(node.children) == 2
+            left_child, right_child = node.children
+            left_clade = Clade(left_child.get_leaf_names())
+            right_clade = Clade(right_child.get_leaf_names())
+            child_subsplit = Subsplit(left_clade, right_clade)
+            if node.is_root():
+                parent_subsplit = Subsplit(child_subsplit.clade())
+            else:
+                parent_node = node.up
+                left_child, right_child = parent_node.children
+                left_clade = Clade(left_child.get_leaf_names())
+                right_clade = Clade(right_child.get_leaf_names())
+                parent_subsplit = Subsplit(left_clade, right_clade)
+            result.add(PCSP(parent_subsplit, child_subsplit))
+        return result
+
     def to_clade_set(self):
         result = set()
         for node in self.traverse():
@@ -531,6 +552,13 @@ class SubsplitClade:
     def __str__(self):
         sister = self.subsplit.clade1 if self.subsplit.clade2 == self.clade else self.subsplit.clade2
         return f"{str(sister)}/{str(self.clade)}"
+
+    @property
+    def other_clade(self):
+        other = self.subsplit.clade1
+        if other == self.clade:
+            other = self.subsplit.clade2
+        return other
 
     def restrict(self, taxon_set):
         taxon_set = Clade(taxon_set)
@@ -1108,9 +1136,71 @@ class PCSPSupport:
                 node.add_child(name=str(right))
         return tree
 
-    def mutualize(self, other):
+    def all_strictly_complete_supports(self, verbose=False):
+        # if not self.is_complete():
+        #     print("Error: SubsplitSupport not complete, no tree possible.")
+        #     return
+        root_subsplit_clade = self.root_subsplit_clade()
+        support_list = []
+        big_stack = [(PCSPSupport(), [root_subsplit_clade])]
+        while big_stack:
+            current_support, parent_clade_stack = big_stack.pop()
+            if verbose:
+                print(f"Current PCSP set: {current_support}")
+                print(f"Current parent-clade stack: {parent_clade_stack}")
+            possibilities = []
+            for parent_clade in parent_clade_stack:
+                if verbose:
+                    print(f"Examining clade: {parent_clade}")
+                subpossibilities = []
+                for subsplit in self.data[parent_clade]:
+                    if subsplit.is_trivial():
+                        continue
+                    pcsp = PCSP(parent_clade, subsplit)
+                    if verbose:
+                        print(f" Appending PCSP: {pcsp}")
+                    subpossibilities.append(pcsp)
+                possibilities.append(subpossibilities)
+                # possibilities.append(PCSP(parent_clade, subsplit) for subsplit in self.data[parent_clade] if not subsplit.is_trivial())
+            for new_pcsps in product(*possibilities):
+                if verbose:
+                    print(f"Examining possibility: {new_pcsps}")
+                new_support = PCSPSupport(current_support)
+                new_parent_clade_stack = []
+                for pcsp in new_pcsps:
+                    # left, right = subsplit
+                    # clade = subsplit.clade()
+                    # if clade not in new_support:
+                    #     new_support[clade] = {frozenset({frozenset(), clade})}
+                    # new_support[clade].add(subsplit)
+                    new_support.add(pcsp)
+                    child = pcsp.child
+                    for child_clade in child.nontrivial_children():
+                        child_ss_clade = SubsplitClade(child, child_clade)
+                        new_parent_clade_stack.append(child_ss_clade)
+                        if verbose:
+                            print(f"Pushing child-clade: {child_ss_clade}")
+                if new_parent_clade_stack:
+                    big_stack.append((new_support, new_parent_clade_stack))
+                    if verbose:
+                        print(f"Pushing subsplit set: {new_support}")
+                else:
+                    support_list.append(new_support)
+                    if verbose:
+                        print(f"Sending to output: {new_support}")
+        return support_list
+
+    def all_trees(self, verbose=False):
+        strict_supports = self.all_strictly_complete_supports(verbose=verbose)
+        return (support.random_tree() for support in strict_supports)
+
+    def mutualize(self, other, verbose=False, visited=None):
         if not isinstance(other, PCSPSupport):
             raise TypeError("Argument 'other' not PCSPSupport.")
+        if isinstance(visited, set):
+            visited.clear()
+        else:
+            visited = set()
         result = PCSPSupport()
         root_clade1 = self.root_clade()
         root_clade2 = other.root_clade()
@@ -1118,7 +1208,13 @@ class PCSPSupport:
         big_root_parent_clade = SubsplitClade(Subsplit(big_clade), Clade(big_clade))
         parent_clade_stack = [(big_root_parent_clade, Subsplit(root_clade1), Subsplit(root_clade2))]
         while parent_clade_stack:
-            parent_clade, restricted_parent1, restricted_parent2 = parent_clade_stack.pop()
+            triplet = parent_clade_stack.pop()
+            if triplet in visited:
+                continue
+            visited.add(triplet)
+            parent_clade, restricted_parent1, restricted_parent2 = triplet
+            if verbose:
+                print(f"Examining ({parent_clade}, {restricted_parent1}, {restricted_parent2})")
             # parent = parent_clade.subsplit
             clade = parent_clade.clade
             restricted_clade1 = clade & root_clade1
@@ -1127,12 +1223,18 @@ class PCSPSupport:
             restricted_parent_clade2 = SubsplitClade(restricted_parent2, restricted_clade2)
             candidate_subsplits1 = self.get(restricted_parent_clade1, set()) | {Subsplit(restricted_clade1)}
             candidate_subsplits2 = other.get(restricted_parent_clade2, set()) | {Subsplit(restricted_clade2)}
+            if verbose:
+                print(f" From ref1: {candidate_subsplits1}")
+                print(f" From ref2: {candidate_subsplits2}")
             candidate_big_subsplits = chain.from_iterable(
                 (big_subsplit for big_subsplit in subsplit1.cross(subsplit2) if big_subsplit.is_strictly_valid())
                 for subsplit1, subsplit2 in product(candidate_subsplits1, candidate_subsplits2)
             )
             for big_subsplit in candidate_big_subsplits:
-                result.add(PCSP(parent_clade, big_subsplit))
+                pcsp = PCSP(parent_clade, big_subsplit)
+                result.add(pcsp)
+                if verbose:
+                    print(f"  Adding {pcsp}")
                 new_restricted_parent1 = big_subsplit.restrict(root_clade1)
                 if new_restricted_parent1.is_trivial() and not self.valid_parent(new_restricted_parent1):
                     new_restricted_parent1 = restricted_parent1
@@ -1141,7 +1243,11 @@ class PCSPSupport:
                     new_restricted_parent2 = restricted_parent2
                 for child_clade in big_subsplit.nontrivial_children():
                     new_parent_clade = SubsplitClade(big_subsplit, child_clade)
+                    # new_item = (new_parent_clade, new_restricted_parent1, new_restricted_parent2)
+                    # parent_clade_stack.append(new_item)
                     parent_clade_stack.append((new_parent_clade, new_restricted_parent1, new_restricted_parent2))
+                    if verbose:
+                        print(f"   Stacking ({new_parent_clade}, {new_restricted_parent1}, {new_restricted_parent2})")
         return result
 
     def add_tree(self, tree):
