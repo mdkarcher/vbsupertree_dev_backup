@@ -1050,14 +1050,21 @@ class PCSPSupport:
         return result
 
     # Keep an eye on if this does what other functions need.
-    def valid_parent(self, parent):
-        if isinstance(parent, SubsplitClade):
-            return parent in self.data
-        if isinstance(parent, Subsplit):
-            return all(SubsplitClade(parent, child) in self.data for child in parent.nontrivial_children())
-        return False
+    def valid_parent(self, parent, subsplit_set=None):
+        if subsplit_set is None:
+            subsplit_set = self.to_subsplit_set()
+        if not isinstance(parent, SubsplitClade):
+            raise TypeError("Argument 'parent' is not of type SubsplitClade.")
+
+        result = False
+        if (len(parent.clade) == 0
+                or (len(parent.clade) == 1 and parent.clade.issubset(self.root_clade()))
+                or parent.subsplit in subsplit_set):
+            result = True
+        return result
 
     def restrict(self, taxon_set):
+        taxon_set = Clade(taxon_set)
         root_subsplit_clade = self.root_subsplit_clade()
         result = PCSPSupport()
         parent_clade_stack = [(root_subsplit_clade, root_subsplit_clade.restrict(taxon_set))]
@@ -1107,6 +1114,13 @@ class PCSPSupport:
 
     def to_string_set(self):
         return set(map(str, self.to_set()))
+
+    def to_subsplit_set(self):
+        result = set()
+        for parent_clade, children in self.data.items():
+            result.add(parent_clade.subsplit)
+            result.update(children)
+        return result
 
     def random_tree(self):
         if not self.is_complete():
@@ -1194,7 +1208,7 @@ class PCSPSupport:
         strict_supports = self.all_strictly_complete_supports(verbose=verbose)
         return (support.random_tree() for support in strict_supports)
 
-    def mutualize(self, other, verbose=False, visited=None):
+    def mutualize(self, other, verbose=False, visited=None, stats=None):
         if not isinstance(other, PCSPSupport):
             raise TypeError("Argument 'other' not PCSPSupport.")
         if isinstance(visited, set):
@@ -1202,52 +1216,77 @@ class PCSPSupport:
         else:
             visited = set()
         result = PCSPSupport()
-        root_clade1 = self.root_clade()
-        root_clade2 = other.root_clade()
+        self_subsplit_set = self.to_subsplit_set()
+        other_subsplit_set = other.to_subsplit_set()
+        root_subsplit_clade1 = self.root_subsplit_clade()
+        root_subsplit_clade2 = other.root_subsplit_clade()
+        root_clade1 = root_subsplit_clade1.clade
+        root_clade2 = root_subsplit_clade2.clade
         big_clade = root_clade1 | root_clade2
         big_root_parent_clade = SubsplitClade(Subsplit(big_clade), Clade(big_clade))
-        parent_clade_stack = [(big_root_parent_clade, Subsplit(root_clade1), Subsplit(root_clade2))]
+        parent_clade_stack = [(big_root_parent_clade, root_subsplit_clade1, root_subsplit_clade2)]
         while parent_clade_stack:
             triplet = parent_clade_stack.pop()
             if triplet in visited:
+                if stats is not None:
+                    stats["skipped_due_to_visited"] = stats.get("skipped_due_to_visited", 0) + 1
                 continue
+            if stats is not None:
+                stats["visited_triplets"] = stats.get("visited_triplets", 0) + 1
             visited.add(triplet)
-            parent_clade, restricted_parent1, restricted_parent2 = triplet
+            parent_clade, restricted_parent_subsplit_clade1, restricted_parent_subsplit_clade2 = triplet
             if verbose:
-                print(f"Examining ({parent_clade}, {restricted_parent1}, {restricted_parent2})")
-            # parent = parent_clade.subsplit
-            clade = parent_clade.clade
-            restricted_clade1 = clade & root_clade1
-            restricted_clade2 = clade & root_clade2
-            restricted_parent_clade1 = SubsplitClade(restricted_parent1, restricted_clade1)
-            restricted_parent_clade2 = SubsplitClade(restricted_parent2, restricted_clade2)
-            candidate_subsplits1 = self.get(restricted_parent_clade1, set()) | {Subsplit(restricted_clade1)}
-            candidate_subsplits2 = other.get(restricted_parent_clade2, set()) | {Subsplit(restricted_clade2)}
+                print(f"Examining ({parent_clade}, {restricted_parent_subsplit_clade1}, {restricted_parent_subsplit_clade2})")
+            candidate_subsplits1 = self.get(restricted_parent_subsplit_clade1, set()) | {Subsplit(restricted_parent_subsplit_clade1.clade)}
+            candidate_subsplits2 = other.get(restricted_parent_subsplit_clade2, set()) | {Subsplit(restricted_parent_subsplit_clade2.clade)}
             if verbose:
                 print(f" From ref1: {candidate_subsplits1}")
                 print(f" From ref2: {candidate_subsplits2}")
             candidate_big_subsplits = chain.from_iterable(
-                (big_subsplit for big_subsplit in subsplit1.cross(subsplit2) if big_subsplit.is_strictly_valid())
+                (big_subsplit for big_subsplit in subsplit1.cross(subsplit2))
                 for subsplit1, subsplit2 in product(candidate_subsplits1, candidate_subsplits2)
             )
             for big_subsplit in candidate_big_subsplits:
+                if stats is not None:
+                    stats["potential_children_generated"] = stats.get("potential_children_generated", 0) + 1
+                if not big_subsplit.is_strictly_valid():
+                    continue
+                if stats is not None:
+                    stats["pcsp_generated"] = stats.get("pcsp_generated", 0) + 1
                 pcsp = PCSP(parent_clade, big_subsplit)
                 result.add(pcsp)
                 if verbose:
                     print(f"  Adding {pcsp}")
-                new_restricted_parent1 = big_subsplit.restrict(root_clade1)
-                if new_restricted_parent1.is_trivial() and not self.valid_parent(new_restricted_parent1):
-                    new_restricted_parent1 = restricted_parent1
-                new_restricted_parent2 = big_subsplit.restrict(root_clade2)
-                if new_restricted_parent2.is_trivial() and not other.valid_parent(new_restricted_parent2):
-                    new_restricted_parent2 = restricted_parent2
                 for child_clade in big_subsplit.nontrivial_children():
-                    new_parent_clade = SubsplitClade(big_subsplit, child_clade)
-                    # new_item = (new_parent_clade, new_restricted_parent1, new_restricted_parent2)
-                    # parent_clade_stack.append(new_item)
-                    parent_clade_stack.append((new_parent_clade, new_restricted_parent1, new_restricted_parent2))
+                    if stats is not None:
+                        stats["childs_child_clades"] = stats.get("childs_child_clades", 0) + 1
                     if verbose:
-                        print(f"   Stacking ({new_parent_clade}, {new_restricted_parent1}, {new_restricted_parent2})")
+                        print(f"   Considering child clade {child_clade}")
+                    new_parent_subsplit_clade = SubsplitClade(big_subsplit, child_clade)
+                    if verbose:
+                        print(f"    New parent subsplit-clade: {new_parent_subsplit_clade}")
+
+                    new_restricted_parent_subsplit_clade1 = new_parent_subsplit_clade.restrict(root_clade1)
+                    if verbose:
+                        print(f"    {new_parent_subsplit_clade} and {root_clade1} = {new_restricted_parent_subsplit_clade1}")
+                    if not self.valid_parent(new_restricted_parent_subsplit_clade1, self_subsplit_set):
+                        if verbose:
+                            print(f"    {new_restricted_parent_subsplit_clade1} not valid parent, replacing with {restricted_parent_subsplit_clade1}")
+                        new_restricted_parent_subsplit_clade1 = restricted_parent_subsplit_clade1
+                    assert new_restricted_parent_subsplit_clade1.clade == child_clade & root_clade1, f"Clade mismatch: {new_restricted_parent_subsplit_clade1.clade} not equal to {child_clade & root_clade1}"
+
+                    new_restricted_parent_subsplit_clade2 = new_parent_subsplit_clade.restrict(root_clade2)
+                    if verbose:
+                        print(f"    {new_parent_subsplit_clade} and {root_clade2} = {new_restricted_parent_subsplit_clade2}")
+                    if not other.valid_parent(new_restricted_parent_subsplit_clade2, other_subsplit_set):
+                        if verbose:
+                            print(f"    {new_restricted_parent_subsplit_clade2} not valid parent, replacing with {restricted_parent_subsplit_clade2}")
+                        new_restricted_parent_subsplit_clade2 = restricted_parent_subsplit_clade2
+                    assert new_restricted_parent_subsplit_clade2.clade == child_clade & root_clade2, f"Clade mismatch: {new_restricted_parent_subsplit_clade2.clade} not equal to {child_clade & root_clade2}"
+
+                    parent_clade_stack.append((new_parent_subsplit_clade, new_restricted_parent_subsplit_clade1, new_restricted_parent_subsplit_clade2))
+                    if verbose:
+                        print(f"   Stacking ({new_parent_subsplit_clade}, {new_restricted_parent_subsplit_clade1}, {new_restricted_parent_subsplit_clade2})")
         return result
 
     def add_tree(self, tree):

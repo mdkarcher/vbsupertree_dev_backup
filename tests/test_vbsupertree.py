@@ -94,17 +94,108 @@ class TestPCSPSupport(unittest.TestCase):
         pcsps2 = PCSPSupport.from_tree(tree)
         self.assertTrue(pcsps2.to_set().issubset(answer))
 
-    def test_mutualization(self):
-        taxa = Clade("ABCDE")
+    def test_mutualization_6_tips_1_left_out_1_tree(self):
+        taxa = Clade("ABCDEF")
         big_tree = MyTree.random(taxa)
-        restriction1 = Clade("ABCD")
-        restriction2 = Clade("ABCE")
+        restriction1 = Clade("ABCDE")
+        restriction2 = Clade("ABCDF")
         tree1 = big_tree.restrict(restriction1)
         tree2 = big_tree.restrict(restriction2)
         ss1 = PCSPSupport.from_tree(tree1)
         ss2 = PCSPSupport.from_tree(tree2)
         mut_ss = ss1.mutualize(ss2)
         big_ss = PCSPSupport.from_tree(big_tree)
+        self.assertTrue(big_ss.to_set().issubset(mut_ss.to_set()))
+
+    def test_mutualization_6_tips_1_left_out_5_trees(self):
+        taxa = Clade("ABCDEF")
+        trees = [MyTree.random(taxa) for _ in range(5)]
+        restriction1 = Clade("ABCDE")
+        restriction2 = Clade("ABCDF")
+        restricted_trees1 = [tree.restrict(restriction1) for tree in trees]
+        restricted_trees2 = [tree.restrict(restriction2) for tree in trees]
+        ss1 = PCSPSupport.from_trees(restricted_trees1)
+        ss2 = PCSPSupport.from_trees(restricted_trees2)
+        mut_ss = ss1.mutualize(ss2)
+        big_ss = PCSPSupport.from_trees(trees)
+        self.assertTrue(big_ss.to_set().issubset(mut_ss.to_set()))
+
+    def test_mutualization_6_tips_1_left_out_25_trees(self):
+        taxa = Clade("ABCDEF")
+        trees = [MyTree.random(taxa) for _ in range(25)]
+        restriction1 = Clade("ABCDE")
+        restriction2 = Clade("ABCDF")
+        restricted_trees1 = [tree.restrict(restriction1) for tree in trees]
+        restricted_trees2 = [tree.restrict(restriction2) for tree in trees]
+        ss1 = PCSPSupport.from_trees(restricted_trees1)
+        ss2 = PCSPSupport.from_trees(restricted_trees2)
+        mut_ss = ss1.mutualize(ss2)
+        big_ss = PCSPSupport.from_trees(trees)
+        self.assertTrue(big_ss.to_set().issubset(mut_ss.to_set()))
+
+    def test_mutualization_6_tips_2_left_out_25_trees(self):
+        taxa = Clade("ABCDEF")
+        trees = [MyTree.random(taxa) for _ in range(25)]
+        restriction1 = Clade("ABCD")
+        restriction2 = Clade("ABEF")
+        restricted_trees1 = [tree.restrict(restriction1) for tree in trees]
+        restricted_trees2 = [tree.restrict(restriction2) for tree in trees]
+        ss1 = PCSPSupport.from_trees(restricted_trees1)
+        ss2 = PCSPSupport.from_trees(restricted_trees2)
+        mut_ss = ss1.mutualize(ss2)
+        big_ss = PCSPSupport.from_trees(trees)
+        self.assertTrue(big_ss.to_set().issubset(mut_ss.to_set()))
+
+    def test_mutualization_6_tips_3_left_out_25_trees(self):
+        taxa = Clade("ABCDEF")
+        trees = [MyTree.random(taxa) for _ in range(25)]
+        restriction1 = Clade("ABC")
+        restriction2 = Clade("DEF")
+        restricted_trees1 = [tree.restrict(restriction1) for tree in trees]
+        restricted_trees2 = [tree.restrict(restriction2) for tree in trees]
+        ss1 = PCSPSupport.from_trees(restricted_trees1)
+        ss2 = PCSPSupport.from_trees(restricted_trees2)
+        mut_ss = ss1.mutualize(ss2)
+        big_ss = PCSPSupport.from_trees(trees)
+        self.assertTrue(big_ss.to_set().issubset(mut_ss.to_set()))
+
+    def test_mutualization_10_tips_1_left_out_25_trees(self):
+        taxa = Clade("ABCDEFGHIJ")
+        trees = [MyTree.random(taxa) for _ in range(25)]
+        restriction1 = Clade("ABCDEFGHI")
+        restriction2 = Clade("ABCDEFGHJ")
+        restricted_trees1 = [tree.restrict(restriction1) for tree in trees]
+        restricted_trees2 = [tree.restrict(restriction2) for tree in trees]
+        ss1 = PCSPSupport.from_trees(restricted_trees1)
+        ss2 = PCSPSupport.from_trees(restricted_trees2)
+        mut_ss = ss1.mutualize(ss2)
+        big_ss = PCSPSupport.from_trees(trees)
+        self.assertTrue(big_ss.to_set().issubset(mut_ss.to_set()))
+
+    def test_mutualization_10_tips_3_left_out_25_trees(self):
+        taxa = Clade("ABCDEFGHIJ")
+        trees = [MyTree.random(taxa) for _ in range(25)]
+        restriction1 = Clade("ABCDEFG")
+        restriction2 = Clade("ABCDHIJ")
+        restricted_trees1 = [tree.restrict(restriction1) for tree in trees]
+        restricted_trees2 = [tree.restrict(restriction2) for tree in trees]
+        ss1 = PCSPSupport.from_trees(restricted_trees1)
+        ss2 = PCSPSupport.from_trees(restricted_trees2)
+        mut_ss = ss1.mutualize(ss2)
+        big_ss = PCSPSupport.from_trees(trees)
+        self.assertTrue(big_ss.to_set().issubset(mut_ss.to_set()))
+
+    def test_mutualization_10_tips_5_left_out_25_trees(self):
+        taxa = Clade("ABCDEFGHIJ")
+        trees = [MyTree.random(taxa) for _ in range(25)]
+        restriction1 = Clade("ABCDE")
+        restriction2 = Clade("FGHIJ")
+        restricted_trees1 = [tree.restrict(restriction1) for tree in trees]
+        restricted_trees2 = [tree.restrict(restriction2) for tree in trees]
+        ss1 = PCSPSupport.from_trees(restricted_trees1)
+        ss2 = PCSPSupport.from_trees(restricted_trees2)
+        mut_ss = ss1.mutualize(ss2)
+        big_ss = PCSPSupport.from_trees(trees)
         self.assertTrue(big_ss.to_set().issubset(mut_ss.to_set()))
 
 
